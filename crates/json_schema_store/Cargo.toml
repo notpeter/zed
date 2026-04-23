@@ -16,6 +16,7 @@ default = []
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+jsonschema.workspace = true
 settings = { workspace = true, features = ["test-support"] }
 
 [dependencies]

@@ -44,7 +44,7 @@ pub struct AllLanguageSettingsContent {
     pub languages: LanguageToSettingsMap,
     /// Settings for associating file extensions and filenames
     /// with languages.
-    pub file_types: Option<HashMap<Arc<str>, ExtendingVec<String>>>,
+    pub file_types: Option<FileTypesMap>,
 }
 
 impl merge_from::MergeFrom for AllLanguageSettingsContent {
@@ -1147,6 +1147,9 @@ pub struct LanguageTaskSettingsContent {
 #[with_fallible_options]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema, MergeFrom)]
 pub struct LanguageToSettingsMap(pub HashMap<String, LanguageSettingsContent>);
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema, MergeFrom)]
+pub struct FileTypesMap(pub HashMap<Arc<str>, ExtendingVec<String>>);
 
 /// Determines how indent guides are colored.
 #[derive(

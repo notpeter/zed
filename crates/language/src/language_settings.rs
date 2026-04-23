@@ -836,7 +836,7 @@ impl settings::Settings for AllLanguageSettings {
 
         let mut file_types: FxHashMap<Arc<str>, (GlobSet, Vec<String>)> = FxHashMap::default();
 
-        for (language, patterns) in all_languages.file_types.iter().flatten() {
+        for (language, patterns) in all_languages.file_types.iter().flat_map(|m| m.0.iter()) {
             let mut builder = GlobSetBuilder::new();
 
             for pattern in &patterns.0 {

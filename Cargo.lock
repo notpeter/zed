@@ -9257,6 +9257,7 @@ dependencies = [
  "extension",
  "feature_flags",
  "gpui",
+ "jsonschema",
  "language",
  "parking_lot",
  "paths",

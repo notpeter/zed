@@ -627,3 +627,54 @@ fn schema_file_match(path: &std::path::Path) -> String {
         .to_string()
         .replace('\\', "/")
 }
+
+#[cfg(test)]
+mod tests {
+    use collections::HashMap;
+    use settings::{SettingsJsonSchemaParams, SettingsStore};
+
+    #[gpui::test]
+    fn test_file_types_schema_language_validation(cx: &mut gpui::App) {
+        SettingsStore::test(cx);
+
+        let params = SettingsJsonSchemaParams {
+            language_names: &["Rust".to_string(), "TypeScript".to_string()],
+            font_names: &[],
+            theme_names: &[],
+            icon_theme_names: &[],
+            lsp_adapter_names: &[],
+            action_names: &[],
+            action_documentation: &HashMap::default(),
+            deprecations: &HashMap::default(),
+            deprecation_messages: &HashMap::default(),
+        };
+
+        let schema = SettingsStore::json_schema(&params);
+        let validator = jsonschema::validator_for(&schema).expect("schema should compile");
+
+        let valid = serde_json::json!({
+            "file_types": {
+                "Rust": ["*.rs"],
+                "TypeScript": ["*.ts", "*.tsx"]
+            }
+        });
+        let errors: Vec<String> = validator
+            .iter_errors(&valid)
+            .map(|e| e.to_string())
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "configured languages should be valid, got: {errors:?}"
+        );
+
+        let invalid = serde_json::json!({
+            "file_types": {
+                "NotALanguage": ["*.foo"]
+            }
+        });
+        assert!(
+            !validator.is_valid(&invalid),
+            "unconfigured language name should fail schema validation"
+        );
+    }
+}

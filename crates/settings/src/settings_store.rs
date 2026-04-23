@@ -32,9 +32,9 @@ use util::{
 use crate::editorconfig_store::EditorconfigStore;
 
 use crate::{
-    ActiveSettingsProfileName, FontFamilyName, IconThemeName, LanguageSettingsContent,
-    LanguageToSettingsMap, LspSettings, LspSettingsMap, SemanticTokenRules, ThemeName,
-    UserSettingsContentExt, VsCodeSettings, WorktreeId,
+    ActiveSettingsProfileName, ExtendingVec, FileTypesMap, FontFamilyName, IconThemeName,
+    LanguageSettingsContent, LanguageToSettingsMap, LspSettings, LspSettingsMap,
+    SemanticTokenRules, ThemeName, UserSettingsContentExt, VsCodeSettings, WorktreeId,
     settings_content::{
         ExtensionsSettingsContent, ProfileBase, ProjectSettingsContent, RootUserSettings,
         SettingsContent, UserSettingsContent, merge_from::MergeFrom,
@@ -1177,6 +1177,17 @@ impl SettingsStore {
                     "type": "object",
                     "errorMessage": "No language with this name is installed.",
                     "properties": params.language_names.iter().map(|name| (name.clone(), language_settings_content_ref.clone())).collect::<serde_json::Map<_, _>>()
+                })
+            });
+
+            let file_type_patterns_ref =
+                generator.subschema_for::<ExtendingVec<String>>().to_value();
+
+            replace_subschema::<FileTypesMap>(generator, || {
+                json_schema!({
+                    "type": "object",
+                    "errorMessage": "No language with this name is installed.",
+                    "properties": params.language_names.iter().map(|name| (name.clone(), file_type_patterns_ref.clone())).collect::<serde_json::Map<_, _>>()
                 })
             });
         }
