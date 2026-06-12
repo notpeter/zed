@@ -5,7 +5,9 @@ use calloop::{
 };
 use util::ResultExt;
 
-use std::{mem::MaybeUninit, thread, time::Duration};
+#[cfg(not(target_os = "illumos"))]
+use std::mem::MaybeUninit;
+use std::{thread, time::Duration};
 
 use gpui::{
     PlatformDispatcher, Priority, PriorityQueueReceiver, PriorityQueueSender, RunnableVariant,
@@ -134,20 +136,24 @@ impl PlatformDispatcher for LinuxDispatcher {
 
     fn spawn_realtime(&self, f: Box<dyn FnOnce() + Send>) {
         std::thread::spawn(move || {
-            // SAFETY: always safe to call
-            let thread_id = unsafe { libc::pthread_self() };
+            #[cfg(not(target_os = "illumos"))]
+            {
+                // SAFETY: always safe to call
+                let thread_id = unsafe { libc::pthread_self() };
 
-            let policy = libc::SCHED_FIFO;
-            let sched_priority = 65;
+                let policy = libc::SCHED_FIFO;
+                let sched_priority = 65;
 
-            // SAFETY: all sched_param members are valid when initialized to zero.
-            let mut sched_param =
-                unsafe { MaybeUninit::<libc::sched_param>::zeroed().assume_init() };
-            sched_param.sched_priority = sched_priority;
-            // SAFETY: sched_param is a valid initialized structure
-            let result = unsafe { libc::pthread_setschedparam(thread_id, policy, &sched_param) };
-            if result != 0 {
-                log::warn!("failed to set realtime thread priority");
+                // SAFETY: all sched_param members are valid when initialized to zero.
+                let mut sched_param =
+                    unsafe { MaybeUninit::<libc::sched_param>::zeroed().assume_init() };
+                sched_param.sched_priority = sched_priority;
+                // SAFETY: sched_param is a valid initialized structure
+                let result =
+                    unsafe { libc::pthread_setschedparam(thread_id, policy, &sched_param) };
+                if result != 0 {
+                    log::warn!("failed to set realtime thread priority");
+                }
             }
 
             f();

@@ -29,7 +29,6 @@ askpass.workspace = true
 clap.workspace = true
 client.workspace = true
 collections.workspace = true
-crashes.workspace = true
 dap_adapters.workspace = true
 debug_adapter_extension.workspace = true
 env_logger.workspace = true
@@ -75,7 +74,10 @@ thiserror.workspace = true
 rayon.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
-[target.'cfg(not(windows))'.dependencies]
+[target.'cfg(not(any(target_os = "freebsd", target_os = "illumos")))'.dependencies]
+crashes.workspace = true
+
+[target.'cfg(all(not(windows), not(target_os = "freebsd"), not(target_os = "illumos")))'.dependencies]
 crash-handler.workspace = true
 fork.workspace = true
 libc.workspace = true

@@ -40,8 +40,9 @@ use reqwest_client::ReqwestClient;
 use rpc::proto::{self, Envelope, REMOTE_SERVER_PROJECT_ID};
 use rpc::{AnyProtoClient, TypedEnvelope};
 use settings::{Settings, SettingsStore, watch_config_file};
+#[cfg(not(any(target_os = "freebsd", target_os = "illumos")))]
+use smol::Timer;
 use smol::{
-    Timer,
     channel::{Receiver, Sender},
     io::AsyncReadExt,
     stream::StreamExt as _,
@@ -542,12 +543,14 @@ pub fn execute_run(
     let startup_time = Instant::now();
     let app = gpui_platform::headless();
     let pid = std::process::id();
+    #[cfg(not(any(target_os = "freebsd", target_os = "illumos")))]
     let id = pid.to_string();
     let should_install_crash_handler = matches!(
         env::var("ZED_GENERATE_MINIDUMPS").as_deref(),
         Ok("true" | "1")
     ) || *RELEASE_CHANNEL != ReleaseChannel::Dev;
 
+    #[cfg(not(any(target_os = "freebsd", target_os = "illumos")))]
     let crash_handler = if should_install_crash_handler {
         Some(app.background_executor().spawn(crashes::init(
             crashes::InitCrashHandler {
@@ -572,6 +575,10 @@ pub fn execute_run(
         crashes::force_backtrace();
         None
     };
+    #[cfg(any(target_os = "freebsd", target_os = "illumos"))]
+    if should_install_crash_handler {
+        log::warn!("crash handler is not supported on this platform");
+    }
     let log_rx = init_logging_server(&log_file)?;
     log::info!(
         "starting up with PID {}:\npid_file: {:?}, log_file: {:?}, stdin_socket: {:?}, stdout_socket: {:?}, stderr_socket: {:?}",
@@ -611,6 +618,7 @@ pub fn execute_run(
 
     let git_hosting_provider_registry = Arc::new(GitHostingProviderRegistry::new());
     let run = move |cx: &mut App| {
+        #[cfg(not(any(target_os = "freebsd", target_os = "illumos")))]
         if let Some(crash_handler) = crash_handler {
             cx.spawn(async move |_cx| {
                 let _crash_handler = crash_handler.await;
@@ -821,12 +829,14 @@ pub(crate) fn execute_proxy(
 
     let server_paths = ServerPaths::new(&identifier)?;
 
+    #[cfg(not(any(target_os = "freebsd", target_os = "illumos")))]
     let id = std::process::id().to_string();
     let should_install_crash_handler = matches!(
         env::var("ZED_GENERATE_MINIDUMPS").as_deref(),
         Ok("true" | "1")
     ) || *RELEASE_CHANNEL != ReleaseChannel::Dev;
 
+    #[cfg(not(any(target_os = "freebsd", target_os = "illumos")))]
     if should_install_crash_handler {
         smol::spawn(crashes::init(
             crashes::InitCrashHandler {
@@ -846,6 +856,10 @@ pub(crate) fn execute_proxy(
         ))
         .detach();
     };
+    #[cfg(any(target_os = "freebsd", target_os = "illumos"))]
+    if should_install_crash_handler {
+        log::warn!("crash handler is not supported on this platform");
+    }
     log::info!("starting proxy process. PID: {}", std::process::id());
     let server_pid = {
         let server_pid = check_pid_file(&server_paths.pid_file).map_err(|source| {
