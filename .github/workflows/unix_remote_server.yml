@@ -1,0 +1,121 @@
+name: unix_remote_server
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+  CARGO_INCREMENTAL: '0'
+
+on:
+  workflow_dispatch: {}
+  push:
+
+jobs:
+  build:
+    name: build remote_server on ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: illumos
+            release: r151056 # omnios LTS 2025-11-03
+            artifact: zed-remote-server-illumos-x86_64.gz
+          - os: freebsd
+            release: '14.3'
+            artifact: zed-remote-server-freebsd-x86_64.gz
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Restore ${{ matrix.os }} Cargo cache
+        id: restore-cargo-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            .cargo-cache-vm
+            .rustup-cache-vm
+          key: remote-server-${{ matrix.os }}-cargo-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            remote-server-${{ matrix.os }}-cargo-${{ hashFiles('Cargo.lock') }}-
+            remote-server-${{ matrix.os }}-cargo-
+
+      - name: Build remote_server on OmniOS
+        if: matrix.os == 'illumos'
+        uses: vmactions/omnios-vm@v1
+        with:
+          release: ${{ matrix.release }}
+          usesh: true
+          mem: 8192
+          copyback: true
+          prepare: |
+            export CARGO_HOME="$GITHUB_WORKSPACE/.cargo-cache-vm"
+            export RUSTUP_HOME="$GITHUB_WORKSPACE/.rustup-cache-vm"
+            pkg install gcc14 curl cmake pkg-config glib2 ooce/developer/protobuf
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          run: |
+            export CARGO_HOME="$GITHUB_WORKSPACE/.cargo-cache-vm"
+            export RUSTUP_HOME="$GITHUB_WORKSPACE/.rustup-cache-vm"
+            . "$CARGO_HOME/env"
+            export PATH="/opt/ooce/bin:$PATH"
+            export PROTOC="/opt/ooce/bin/protoc"
+            export TMPDIR="/var/tmp"
+            export CARGO_BUILD_JOBS=1
+            export CARGO_PROFILE_RELEASE_DEBUG=0
+            export CARGO_PROFILE_RELEASE_LTO=false
+            export CARGO_PROFILE_RELEASE_OPT_LEVEL=2
+            export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+            rustc --version --verbose
+            cargo build --release --locked -p remote_server \
+                --target "x86_64-unknown-${{ matrix.os }}" \
+                --target-dir /var/tmp/zed-target
+            /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote_server version
+            mkdir -p artifacts
+            gzip -c /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote_server \
+                > artifacts/${{ matrix.artifact }}
+
+      - name: Build remote_server on FreeBSD
+        if: matrix.os == 'freebsd'
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: ${{ matrix.release }}
+          usesh: true
+          mem: 8192
+          copyback: true
+          prepare: |
+            export CARGO_HOME="$GITHUB_WORKSPACE/.cargo-cache-vm"
+            export RUSTUP_HOME="$GITHUB_WORKSPACE/.rustup-cache-vm"
+            pkg install -y curl cmake pkgconf protobuf
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          run: |
+            export CARGO_HOME="$GITHUB_WORKSPACE/.cargo-cache-vm"
+            export RUSTUP_HOME="$GITHUB_WORKSPACE/.rustup-cache-vm"
+            . "$CARGO_HOME/env"
+            export PROTOC="/usr/local/bin/protoc"
+            export CARGO_BUILD_JOBS=2
+            export CARGO_PROFILE_RELEASE_DEBUG=0
+            export CARGO_PROFILE_RELEASE_LTO=false
+            export CARGO_PROFILE_RELEASE_OPT_LEVEL=2
+            export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+            rustc --version --verbose
+            cargo build --release --locked -p remote_server \
+                --target "x86_64-unknown-${{ matrix.os }}" \
+                --target-dir /var/tmp/zed-target
+            /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote_server version
+            mkdir -p artifacts
+            gzip -c /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote_server \
+                > artifacts/${{ matrix.artifact }}
+
+      - name: Upload ${{ matrix.os }} remote_server
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ matrix.artifact }}
+          path: artifacts/${{ matrix.artifact }}
+          if-no-files-found: error
+
+      - name: Save ${{ matrix.os }} Cargo cache
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            .cargo-cache-vm
+            .rustup-cache-vm
+          key: ${{ steps.restore-cargo-cache.outputs.cache-primary-key }}
