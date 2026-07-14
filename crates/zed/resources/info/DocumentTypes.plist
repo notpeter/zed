@@ -31,6 +31,8 @@
         <key>CFBundleTypeExtensions</key>
         <array>
             <string>Gemfile</string>
+            <string>adoc</string>
+            <string>asciidoc</string>
             <string>c</string>
             <string>c++</string>
             <string>cc</string>
