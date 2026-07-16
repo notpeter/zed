@@ -3,7 +3,7 @@ use calloop::{
     channel::{self, Sender},
     timer::TimeoutAction,
 };
-use util::ResultExt;
+use gpui_util::ResultExt;
 
 #[cfg(not(target_os = "illumos"))]
 use std::mem::MaybeUninit;
@@ -129,9 +129,12 @@ impl PlatformDispatcher for LinuxDispatcher {
     }
 
     fn dispatch_after(&self, duration: Duration, runnable: RunnableVariant) {
-        self.timer_sender
-            .send(TimerAfter { duration, runnable })
-            .ok();
+        if let Err(err) = self.timer_sender.send(TimerAfter { duration, runnable }) {
+            // The timer thread has shut down. Dropping a scheduled runnable cancels its task
+            // and makes the next poll of any awaiter panic. Leaking leaves the task pending,
+            // which is acceptable during shutdown.
+            std::mem::forget(err);
+        }
     }
 
     fn spawn_realtime(&self, f: Box<dyn FnOnce() + Send>) {
