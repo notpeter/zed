@@ -8,6 +8,11 @@ env:
 on:
   workflow_dispatch: {}
   push:
+    branches:
+      - '**'
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -120,3 +125,39 @@ jobs:
             .cargo-cache-vm
             .rustup-cache-vm
           key: ${{ steps.restore-cargo-cache.outputs.cache-primary-key }}
+
+  release:
+    name: Publish development release
+    needs: build
+    if: github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download remote_server artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: zed-remote-server-*.gz
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create development release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="${GITHUB_REF_NAME//\//_}"
+          timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+          short_hash="${GITHUB_SHA:0:7}"
+          tag="notpeter_${branch}_${timestamp}_${short_hash}"
+          gh release create "$tag" \
+            artifacts/zed-remote-server-illumos-x86_64.gz \
+            artifacts/zed-remote-server-freebsd-x86_64.gz \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --notes "Development remote_server builds for ${GITHUB_REF_NAME} at ${GITHUB_SHA}." \
+            --prerelease \
+            --latest=false
