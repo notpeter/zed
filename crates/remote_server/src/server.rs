@@ -48,7 +48,6 @@ use smol::{
     stream::StreamExt as _,
 };
 use std::{
-    env,
     ffi::OsStr,
     fs::File,
     io::Write,
@@ -573,10 +572,8 @@ pub fn execute_run(
     let pid = std::process::id();
     #[cfg(not(any(target_os = "freebsd", target_os = "illumos")))]
     let id = pid.to_string();
-    let should_install_crash_handler = matches!(
-        env::var("ZED_GENERATE_MINIDUMPS").as_deref(),
-        Ok("true" | "1")
-    ) || *RELEASE_CHANNEL != ReleaseChannel::Dev;
+    let should_install_crash_handler =
+        client::telemetry::should_install_crash_handler(*RELEASE_CHANNEL);
 
     #[cfg(not(any(target_os = "freebsd", target_os = "illumos")))]
     let crash_handler = if should_install_crash_handler {
@@ -619,7 +616,7 @@ pub fn execute_run(
     );
 
     write_pid_file(&pid_file, pid)
-        .with_context(|| format!("failed to write pid file: {:?}", &pid_file))?;
+        .with_context(|| format!("failed to write pid file: {pid_file:?}"))?;
 
     let listeners = ServerListeners::new(stdin_socket, stdout_socket, stderr_socket)?;
 
@@ -688,7 +685,7 @@ pub fn execute_run(
         json_schema_store::init(cx);
 
         let project = cx.new(|cx| {
-            let fs = Arc::new(RealFs::new(None, cx.background_executor().clone()));
+            let fs = RealFs::new(None, cx.background_executor().clone());
             let node_settings_rx = initialize_settings(session.clone(), fs.clone(), cx);
 
             let proxy_url = read_proxy_settings(cx);
@@ -860,10 +857,8 @@ pub(crate) fn execute_proxy(
 
     #[cfg(not(any(target_os = "freebsd", target_os = "illumos")))]
     let id = std::process::id().to_string();
-    let should_install_crash_handler = matches!(
-        env::var("ZED_GENERATE_MINIDUMPS").as_deref(),
-        Ok("true" | "1")
-    ) || *RELEASE_CHANNEL != ReleaseChannel::Dev;
+    let should_install_crash_handler =
+        client::telemetry::should_install_crash_handler(*RELEASE_CHANNEL);
 
     #[cfg(not(any(target_os = "freebsd", target_os = "illumos")))]
     if should_install_crash_handler {
