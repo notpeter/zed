@@ -1368,6 +1368,10 @@ fn is_new_version(version: &str) -> bool {
 }
 
 fn is_file_in_use(file_name: &OsStr) -> bool {
+    if is_current_executable(file_name) {
+        return true;
+    }
+
     let info = sysinfo::System::new_with_specifics(sysinfo::RefreshKind::nothing().with_processes(
         sysinfo::ProcessRefreshKind::nothing().with_exe(sysinfo::UpdateKind::Always),
     ));
@@ -1384,9 +1388,26 @@ fn is_file_in_use(file_name: &OsStr) -> bool {
     false
 }
 
+fn is_current_executable(file_name: &OsStr) -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.file_name().map(|name| name == file_name))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_executable_is_in_use() {
+        let current_exe = std::env::current_exe().expect("get current executable");
+        let file_name = current_exe
+            .file_name()
+            .expect("current executable has a name");
+
+        assert!(is_current_executable(file_name));
+    }
 
     #[test]
     fn rotated_remote_log_path_uses_numbered_log_suffix() {
