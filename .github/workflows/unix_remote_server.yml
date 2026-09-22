@@ -65,7 +65,8 @@ jobs:
             export CARGO_PROFILE_RELEASE_OPT_LEVEL=2
             export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
             rustc --version --verbose
-            cargo build --release --locked -p remote_server \
+            cargo --config 'target."cfg(all())".rustflags=["-C","link-arg=-YP,/lib/amd64:/usr/lib/amd64"]' \
+                build --release --locked -p remote_server \
                 --target "x86_64-unknown-${{ matrix.os }}" \
                 --target-dir /var/tmp/zed-target
             /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote_server version
