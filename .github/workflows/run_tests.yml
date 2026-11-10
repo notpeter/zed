@@ -668,12 +668,12 @@ jobs:
       run: |
         rm -rf ./../.cargo
     timeout-minutes: 60
-  smoke_test_freebsd_remote_server:
+  build_freebsd_remote_server:
     needs:
     - orchestrate
     - check_style
     if: needs.orchestrate.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-8x16-ubuntu-2204
     env:
       CARGO_PROFILE_DEV_DEBUG: '0'
     steps:
@@ -685,11 +685,14 @@ jobs:
       uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
       with:
         clean: false
+    - name: run_bundling::setup_freebsd_cross_build
+      run: echo "FREEBSD_SYSROOT=$GITHUB_WORKSPACE/target/freebsd-sysroot-$SYSROOT_CACHE_KEY" >> "$GITHUB_ENV"
+      env:
+        SYSROOT_CACHE_KEY: ${{ hashFiles('script/build-remote-server-freebsd') }}
     - name: Cache FreeBSD sysroot
-      uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306
+      uses: namespacelabs/nscloud-cache-action@a90bb5d4b27522ce881c6e98eebd7d7e6d1653f9
       with:
-        path: target/freebsd-sysroot
-        key: freebsd-amd64-sysroot-${{ hashFiles('script/build-remote-server-freebsd') }}
+        path: ${{ env.FREEBSD_SYSROOT }}
     - name: run_bundling::setup_freebsd_cross_build
       run: sudo apt-get update && sudo apt-get install -y cmake ninja-build protobuf-compiler
     - name: run_bundling::setup_freebsd_cross_build
@@ -705,8 +708,32 @@ jobs:
         echo "$tools_directory/cargo-zigbuild" >> "$GITHUB_PATH"
         echo "$tools_directory/zig" >> "$GITHUB_PATH"
         rustup target add x86_64-unknown-freebsd
-    - name: run_tests::smoke_test_freebsd_remote_server
+    - name: run_tests::build_freebsd_remote_server
       run: ./script/build-remote-server-freebsd
+    - name: run_tests::build_freebsd_remote_server
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: freebsd-remote-server-smoke
+        path: target/x86_64-unknown-freebsd/debug/remote-server
+        if-no-files-found: error
+    timeout-minutes: 180
+  smoke_test_freebsd_remote_server:
+    needs:
+    - build_freebsd_remote_server
+    - orchestrate
+    - check_style
+    if: needs.orchestrate.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: steps::harden_runner
+      uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411
+      with:
+        egress-policy: audit
+    - name: run_tests::smoke_test_freebsd_remote_server
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: freebsd-remote-server-smoke
+        path: freebsd-smoke
     - name: Run cross-built remote server on FreeBSD
       uses: vmactions/freebsd-vm@v1
       with:
@@ -715,8 +742,9 @@ jobs:
         copyback: false
         run: |
           set -eu
-          target/x86_64-unknown-freebsd/debug/remote-server version
-    timeout-minutes: 180
+          chmod +x freebsd-smoke/remote-server
+          freebsd-smoke/remote-server version
+    timeout-minutes: 15
   check_dependencies:
     needs:
     - orchestrate
@@ -1068,6 +1096,7 @@ jobs:
     - doctests
     - check_workspace_binaries
     - check_wasm
+    - build_freebsd_remote_server
     - smoke_test_freebsd_remote_server
     - check_dependencies
     - check_docs
@@ -1103,6 +1132,7 @@ jobs:
         check_result "doctests" "$RESULT_DOCTESTS"
         check_result "check_workspace_binaries" "$RESULT_CHECK_WORKSPACE_BINARIES"
         check_result "check_wasm" "$RESULT_CHECK_WASM"
+        check_result "build_freebsd_remote_server" "$RESULT_BUILD_FREEBSD_REMOTE_SERVER"
         check_result "smoke_test_freebsd_remote_server" "$RESULT_SMOKE_TEST_FREEBSD_REMOTE_SERVER"
         check_result "check_dependencies" "$RESULT_CHECK_DEPENDENCIES"
         check_result "check_docs" "$RESULT_CHECK_DOCS"
@@ -1128,6 +1158,7 @@ jobs:
         RESULT_DOCTESTS: ${{ needs.doctests.result }}
         RESULT_CHECK_WORKSPACE_BINARIES: ${{ needs.check_workspace_binaries.result }}
         RESULT_CHECK_WASM: ${{ needs.check_wasm.result }}
+        RESULT_BUILD_FREEBSD_REMOTE_SERVER: ${{ needs.build_freebsd_remote_server.result }}
         RESULT_SMOKE_TEST_FREEBSD_REMOTE_SERVER: ${{ needs.smoke_test_freebsd_remote_server.result }}
         RESULT_CHECK_DEPENDENCIES: ${{ needs.check_dependencies.result }}
         RESULT_CHECK_DOCS: ${{ needs.check_docs.result }}

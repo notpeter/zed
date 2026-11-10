@@ -108,11 +108,14 @@ jobs:
       uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
       with:
         clean: false
+    - name: run_bundling::setup_freebsd_cross_build
+      run: echo "FREEBSD_SYSROOT=$GITHUB_WORKSPACE/target/freebsd-sysroot-$SYSROOT_CACHE_KEY" >> "$GITHUB_ENV"
+      env:
+        SYSROOT_CACHE_KEY: ${{ hashFiles('script/build-remote-server-freebsd') }}
     - name: Cache FreeBSD sysroot
-      uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306
+      uses: namespacelabs/nscloud-cache-action@a90bb5d4b27522ce881c6e98eebd7d7e6d1653f9
       with:
-        path: target/freebsd-sysroot
-        key: freebsd-amd64-sysroot-${{ hashFiles('script/build-remote-server-freebsd') }}
+        path: ${{ env.FREEBSD_SYSROOT }}
     - name: run_bundling::setup_freebsd_cross_build
       run: sudo apt-get update && sudo apt-get install -y cmake ninja-build protobuf-compiler
     - name: run_bundling::setup_freebsd_cross_build

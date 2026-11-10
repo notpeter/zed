@@ -277,15 +277,18 @@ pub(crate) fn setup_freebsd_cross_build(job: Job) -> Job {
         .add_step(steps::harden_runner())
         .add_step(steps::checkout_repo())
         .add_step(
+            named::bash(r#"echo "FREEBSD_SYSROOT=$GITHUB_WORKSPACE/target/freebsd-sysroot-$SYSROOT_CACHE_KEY" >> "$GITHUB_ENV""#)
+                // Version the cache path by the pinned archive checksum and extraction recipe.
+                .add_env(("SYSROOT_CACHE_KEY", "${{ hashFiles('script/build-remote-server-freebsd') }}")),
+        )
+        .add_step(
             Step::new("Cache FreeBSD sysroot")
                 .uses(
-                    "actions",
-                    "cache",
-                    "cdf6c1fa76f9f475f3d7449005a359c84ca0f306", // v5.0.3
+                    "namespacelabs",
+                    "nscloud-cache-action",
+                    "a90bb5d4b27522ce881c6e98eebd7d7e6d1653f9", // v1
                 )
-                .add_with(("path", "target/freebsd-sysroot"))
-                // Includes the pinned archive checksum and extraction recipe.
-                .add_with(("key", "freebsd-amd64-sysroot-${{ hashFiles('script/build-remote-server-freebsd') }}")),
+                .add_with(("path", "${{ env.FREEBSD_SYSROOT }}")),
         )
         .add_step(named::bash("sudo apt-get update && sudo apt-get install -y cmake ninja-build protobuf-compiler"))
         .add_step(named::bash(indoc! {r#"

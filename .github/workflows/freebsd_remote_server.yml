@@ -1,12 +1,6 @@
 name: freebsd_remote_server
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: '1'
-  CARGO_INCREMENTAL: '0'
-
 on:
-  workflow_dispatch: {}
   push:
     branches:
       - '**'
@@ -14,70 +8,83 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+
 jobs:
   build:
-    name: build remote_server on freebsd
+    name: Cross-build FreeBSD remote server
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-
-      - name: Restore freebsd Cargo cache
-        id: restore-cargo-cache
-        uses: actions/cache/restore@v5
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
-          path: |
-            .cargo-cache-vm
-            .rustup-cache-vm
-          key: remote-server-freebsd-cargo-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            remote-server-freebsd-cargo-${{ hashFiles('Cargo.lock') }}-
-            remote-server-freebsd-cargo-
+          egress-policy: audit
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build protobuf-compiler time
+      - name: Install pinned cross-build tools
+        run: |
+          tools_directory="$RUNNER_TEMP/freebsd-build-tools"
+          mkdir -p "$tools_directory/cargo-zigbuild" "$tools_directory/zig"
+          curl --fail --location --retry 3 https://github.com/rust-cross/cargo-zigbuild/releases/download/v0.22.1/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz -o "$tools_directory/cargo-zigbuild.tar.xz"
+          echo "b18ca96a420b4fce29cd397308289b1f34298ca9d425daa0b4450fc95ee3260b  $tools_directory/cargo-zigbuild.tar.xz" | sha256sum --check
+          curl --fail --location --retry 3 https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz -o "$tools_directory/zig.tar.xz"
+          echo "473ec26806133cf4d1918caf1a410f8403a13d979726a9045b421b685031a982  $tools_directory/zig.tar.xz" | sha256sum --check
+          tar -xJf "$tools_directory/cargo-zigbuild.tar.xz" -C "$tools_directory/cargo-zigbuild" --strip-components=1
+          tar -xJf "$tools_directory/zig.tar.xz" -C "$tools_directory/zig" --strip-components=1
+          echo "$tools_directory/cargo-zigbuild" >> "$GITHUB_PATH"
+          echo "$tools_directory/zig" >> "$GITHUB_PATH"
+          rustup target add x86_64-unknown-freebsd
+      - name: Report build environment
+        run: |
+          nproc
+          free -h
+          rustc --version --verbose
+          cargo-zigbuild --version
+          zig version
+      - name: Time FreeBSD cross-build
+        run: |
+          started_at=$SECONDS
+          /usr/bin/time --verbose ./script/build-remote-server-freebsd
+          echo "Cold development cross-build (including sysroot download/extraction): $((SECONDS - started_at)) seconds" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload remote server for smoke test
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: freebsd-remote-server-smoke
+          path: target/x86_64-unknown-freebsd/debug/remote-server
+          if-no-files-found: error
 
-      - name: Build remote_server on FreeBSD
+  smoke:
+    name: Run remote server on FreeBSD
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+      - name: Download remote server
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: freebsd-remote-server-smoke
+          path: freebsd-smoke
+      - name: Smoke test in FreeBSD VM
         uses: vmactions/freebsd-vm@v1
         with:
           release: '14.3'
           usesh: true
-          mem: 8192
-          copyback: true
-          prepare: |
-            set -eu
-            export CARGO_HOME="$GITHUB_WORKSPACE/.cargo-cache-vm"
-            export RUSTUP_HOME="$GITHUB_WORKSPACE/.rustup-cache-vm"
-            pkg install -y curl cmake pkgconf protobuf
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          copyback: false
           run: |
             set -eu
-            export CARGO_HOME="$GITHUB_WORKSPACE/.cargo-cache-vm"
-            export RUSTUP_HOME="$GITHUB_WORKSPACE/.rustup-cache-vm"
-            . "$CARGO_HOME/env"
-            export PROTOC="/usr/local/bin/protoc"
-            export CARGO_BUILD_JOBS=2
-            export CARGO_PROFILE_RELEASE_DEBUG=0
-            export CARGO_PROFILE_RELEASE_LTO=false
-            export CARGO_PROFILE_RELEASE_OPT_LEVEL=2
-            export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
-            rustc --version --verbose
-            cargo build --release --locked -p remote_server \
-                --target "x86_64-unknown-freebsd" \
-                --target-dir /var/tmp/zed-target
-            /var/tmp/zed-target/x86_64-unknown-freebsd/release/remote-server version
-            mkdir -p artifacts
-            gzip -c /var/tmp/zed-target/x86_64-unknown-freebsd/release/remote-server \
-                > artifacts/zed-remote-server-freebsd-x86_64.gz
+            chmod +x freebsd-smoke/remote-server
+            time freebsd-smoke/remote-server version
 
-      - name: Upload freebsd remote_server
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: zed-remote-server-freebsd-x86_64.gz
-          path: artifacts/zed-remote-server-freebsd-x86_64.gz
-          if-no-files-found: error
-
-      - name: Save freebsd Cargo cache
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            .cargo-cache-vm
-            .rustup-cache-vm
-          key: ${{ steps.restore-cargo-cache.outputs.cache-primary-key }}
+defaults:
+  run:
+    shell: bash -euxo pipefail {0}
