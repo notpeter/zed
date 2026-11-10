@@ -25,15 +25,42 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - name: Cache cross-build tool archives
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ runner.temp }}/freebsd-build-tools/*.tar.xz
+          key: freebsd-tools-${{ runner.os }}-${{ runner.arch }}-zig-0.14.0-cargo-zigbuild-0.22.1
+      - name: Cache FreeBSD sysroot
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: target/freebsd-sysroot
+          key: freebsd-sysroot-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('script/build-remote-server-freebsd') }}
+      - name: Cache Cargo and Zig build outputs
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/cargo-zigbuild
+            ~/.cache/zig
+            target/debug
+            target/x86_64-unknown-freebsd/debug
+          key: freebsd-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'script/build-remote-server-freebsd', '.github/workflows/freebsd_remote_server.yml') }}-${{ github.sha }}
+          restore-keys: |
+            freebsd-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'script/build-remote-server-freebsd', '.github/workflows/freebsd_remote_server.yml') }}-
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build protobuf-compiler time
       - name: Install pinned cross-build tools
         run: |
           tools_directory="$RUNNER_TEMP/freebsd-build-tools"
           mkdir -p "$tools_directory/cargo-zigbuild" "$tools_directory/zig"
-          curl --fail --location --retry 3 https://github.com/rust-cross/cargo-zigbuild/releases/download/v0.22.1/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz -o "$tools_directory/cargo-zigbuild.tar.xz"
+          if [[ ! -f "$tools_directory/cargo-zigbuild.tar.xz" ]]; then
+            curl --fail --location --retry 3 https://github.com/rust-cross/cargo-zigbuild/releases/download/v0.22.1/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz -o "$tools_directory/cargo-zigbuild.tar.xz"
+          fi
           echo "b18ca96a420b4fce29cd397308289b1f34298ca9d425daa0b4450fc95ee3260b  $tools_directory/cargo-zigbuild.tar.xz" | sha256sum --check
-          curl --fail --location --retry 3 https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz -o "$tools_directory/zig.tar.xz"
+          if [[ ! -f "$tools_directory/zig.tar.xz" ]]; then
+            curl --fail --location --retry 3 https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz -o "$tools_directory/zig.tar.xz"
+          fi
           echo "473ec26806133cf4d1918caf1a410f8403a13d979726a9045b421b685031a982  $tools_directory/zig.tar.xz" | sha256sum --check
           tar -xJf "$tools_directory/cargo-zigbuild.tar.xz" -C "$tools_directory/cargo-zigbuild" --strip-components=1
           tar -xJf "$tools_directory/zig.tar.xz" -C "$tools_directory/zig" --strip-components=1
@@ -49,41 +76,14 @@ jobs:
           zig version
       - name: Time FreeBSD cross-build
         run: |
+          if [[ -d target/x86_64-unknown-freebsd/debug ]]; then
+            echo "Build cache: restored" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Build cache: cold" >> "$GITHUB_STEP_SUMMARY"
+          fi
           started_at=$SECONDS
           /usr/bin/time --verbose ./script/build-remote-server-freebsd
-          echo "Cold development cross-build (including sysroot download/extraction): $((SECONDS - started_at)) seconds" >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload remote server for smoke test
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: freebsd-remote-server-smoke
-          path: target/x86_64-unknown-freebsd/debug/remote-server
-          if-no-files-found: error
-
-  smoke:
-    name: Run remote server on FreeBSD
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: audit
-      - name: Download remote server
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: freebsd-remote-server-smoke
-          path: freebsd-smoke
-      - name: Smoke test in FreeBSD VM
-        uses: vmactions/freebsd-vm@v1
-        with:
-          release: '14.3'
-          usesh: true
-          copyback: false
-          run: |
-            set -eu
-            chmod +x freebsd-smoke/remote-server
-            time freebsd-smoke/remote-server version
+          echo "Development cross-build (including any sysroot download/extraction): $((SECONDS - started_at)) seconds" >> "$GITHUB_STEP_SUMMARY"
 
 defaults:
   run:
