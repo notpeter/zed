@@ -83,6 +83,9 @@ pub(crate) fn run_tests() -> Workflow {
             .and_not_in_merge_queue()
             .then(check_workspace_binaries()),
         should_run_tests.and_not_in_merge_queue().then(check_wasm()),
+        should_run_tests
+            .and_always()
+            .then(smoke_test_freebsd_remote_server()),
         should_run_tests.and_always().then(check_dependencies()), // could be more specific here?
         should_check_docs
             .and_not_in_merge_queue()
@@ -931,4 +934,27 @@ fn extension_tests() -> NamedJob<UsesJob> {
         .with(Input::default().add("working-directory", "${{ matrix.extension }}"));
 
     named::job(job)
+}
+
+fn smoke_test_freebsd_remote_server() -> NamedJob {
+    named::job(
+        super::run_bundling::setup_freebsd_cross_build(Job::default())
+            .runs_on("ubuntu-latest")
+            .add_env(("CARGO_PROFILE_DEV_DEBUG", "0"))
+            .add_step(named::bash("./script/build-remote-server-freebsd"))
+            .add_step(
+                Step::new("Run cross-built remote server on FreeBSD")
+                    .uses("vmactions", "freebsd-vm", "v1")
+                    .add_with(("release", "14.3"))
+                    .add_with(("usesh", true))
+                    .add_with(("copyback", false))
+                    .add_with((
+                        "run",
+                        indoc::indoc! {r#"
+                        set -eu
+                        target/x86_64-unknown-freebsd/debug/remote-server version
+                    "#},
+                    )),
+            ),
+    )
 }

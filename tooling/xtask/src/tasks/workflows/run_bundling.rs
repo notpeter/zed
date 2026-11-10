@@ -16,6 +16,7 @@ use indoc::indoc;
 
 pub fn run_bundling() -> Workflow {
     let bundle = ReleaseBundleJobs {
+        freebsd_x86_64: bundle_freebsd(None, &[]),
         linux_aarch64: bundle_linux(Arch::AARCH64, None, false, &[]),
         linux_x86_64: bundle_linux(Arch::X86_64, None, false, &[]),
         bwrap_linux_aarch64: build_static_bwrap(Arch::AARCH64, &[]),
@@ -267,4 +268,56 @@ fn set_release_channel_to_nightly(platform: Platform) -> Step<Run> {
         "#})
         .working_directory("${{ env.ZED_WORKSPACE }}"),
     }
+}
+
+pub(crate) fn setup_freebsd_cross_build(job: Job) -> Job {
+    job
+        .runs_on(runners::LINUX_LARGE)
+        .timeout_minutes(180u32)
+        .add_step(steps::harden_runner())
+        .add_step(steps::checkout_repo())
+        .add_step(
+            Step::new("Cache FreeBSD sysroot")
+                .uses(
+                    "actions",
+                    "cache",
+                    "cdf6c1fa76f9f475f3d7449005a359c84ca0f306", // v5.0.3
+                )
+                .add_with(("path", "target/freebsd-sysroot"))
+                // Includes the pinned archive checksum and extraction recipe.
+                .add_with(("key", "freebsd-amd64-sysroot-${{ hashFiles('script/build-remote-server-freebsd') }}")),
+        )
+        .add_step(named::bash("sudo apt-get update && sudo apt-get install -y cmake ninja-build protobuf-compiler"))
+        .add_step(named::bash(indoc! {r#"
+            tools_directory="$RUNNER_TEMP/freebsd-build-tools"
+            mkdir -p "$tools_directory/cargo-zigbuild" "$tools_directory/zig"
+            curl --fail --location --retry 3 https://github.com/rust-cross/cargo-zigbuild/releases/download/v0.22.1/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz -o "$tools_directory/cargo-zigbuild.tar.xz"
+            echo "b18ca96a420b4fce29cd397308289b1f34298ca9d425daa0b4450fc95ee3260b  $tools_directory/cargo-zigbuild.tar.xz" | sha256sum --check
+            curl --fail --location --retry 3 https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz -o "$tools_directory/zig.tar.xz"
+            echo "473ec26806133cf4d1918caf1a410f8403a13d979726a9045b421b685031a982  $tools_directory/zig.tar.xz" | sha256sum --check
+            tar -xJf "$tools_directory/cargo-zigbuild.tar.xz" -C "$tools_directory/cargo-zigbuild" --strip-components=1
+            tar -xJf "$tools_directory/zig.tar.xz" -C "$tools_directory/zig" --strip-components=1
+            echo "$tools_directory/cargo-zigbuild" >> "$GITHUB_PATH"
+            echo "$tools_directory/zig" >> "$GITHUB_PATH"
+            rustup target add x86_64-unknown-freebsd
+        "#}))
+}
+
+pub(crate) fn bundle_freebsd(
+    release_channel: Option<ReleaseChannel>,
+    deps: &[&NamedJob],
+) -> NamedJob {
+    named::job(
+        setup_freebsd_cross_build(bundle_job(deps))
+            .when_some(release_channel, |job, release_channel| {
+                job.add_step(set_release_channel(Platform::Linux, release_channel))
+            })
+            .add_step(named::bash(
+                "./script/build-remote-server-freebsd --release",
+            ))
+            .add_step(upload_artifact(&format!(
+                "target/{}",
+                assets::REMOTE_SERVER_FREEBSD_X86_64
+            ))),
+    )
 }
