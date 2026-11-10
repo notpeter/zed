@@ -108,6 +108,7 @@ pub async fn collect_compaction_result(
             | LanguageModelCompletionEvent::ToolUseJsonParseError { .. }
             | LanguageModelCompletionEvent::StartMessage { .. }
             | LanguageModelCompletionEvent::ReasoningDetails(_)
+            | LanguageModelCompletionEvent::InputTransformations(_)
             | LanguageModelCompletionEvent::Compaction(CompactionUpdate::Started)
             | LanguageModelCompletionEvent::Compaction(CompactionUpdate::SummaryDelta(_)) => {}
         }
@@ -290,6 +291,19 @@ pub fn into_anthropic(
     cache_mode: AnthropicPromptCacheMode,
     compaction_state_owner: &LanguageModelProviderId,
 ) -> Result<crate::Request> {
+    let requires_adaptive_thinking = matches!(
+        model.as_str(),
+        "claude-fable-5-2"
+            | "claude-mythos-5-2"
+            | "claude-opus-5-5"
+            | "claude-sonnet-5-5"
+            | "claude-haiku-5-5"
+    );
+    let mode = if requires_adaptive_thinking {
+        AnthropicModelMode::AdaptiveThinking
+    } else {
+        mode
+    };
     let max_output_tokens = request
         .max_output_tokens
         .map_or(max_output_tokens, |limit| limit.min(max_output_tokens));
@@ -416,17 +430,27 @@ pub fn into_anthropic(
             }),
             AnthropicModelMode::Default => None,
         }
+    } else if model == "claude-sonnet-5-5" {
+        Some(Thinking::BetweenTools)
     } else if crate::requires_explicit_thinking_opt_out(&model) {
-        // On Claude Opus 5, omitting the `thinking` field no longer means
+        // On Claude Opus 5 and Haiku 5.5, omitting the `thinking` field no longer means
         // "off": the model runs adaptive thinking by default, so features
         // that suppress thinking (e.g. inline assist) must opt out
         // explicitly. `disabled` is only accepted at effort `high` or below;
         // that holds here because `output_config` is never sent when thinking
-        // is disallowed, and the server-side default effort is `high`.
+        // is disallowed, and the server-side default effort is `high` or below.
         // <https://platform.claude.com/docs/en/about-claude/models/migration-guide#migrating-to-claude-opus-5>
         Some(Thinking::Disabled)
     } else {
         None
+    };
+
+    // These models reject non-default sampling controls even when thinking is off.
+    // <https://platform.claude.com/docs/en/build-with-claude/thinking#sampling-parameters>
+    let temperature = if requires_adaptive_thinking {
+        None
+    } else {
+        request.temperature.or(Some(default_temperature))
     };
 
     Ok(crate::Request {
@@ -473,7 +497,7 @@ pub fn into_anthropic(
         },
         stop_sequences: Vec::new(),
         speed: request.speed.map(Into::into),
-        temperature: request.temperature.or(Some(default_temperature)),
+        temperature,
         top_k: None,
         top_p: None,
         context_management: request.compact_at_tokens.map(|value| ContextManagement {
@@ -705,14 +729,20 @@ impl AnthropicEventMapper {
             }
             Event::MessageStart { message } => {
                 update_usage(&mut self.usage, &message.usage);
-                vec![
+                let mut events = vec![
                     Ok(LanguageModelCompletionEvent::UsageUpdate(convert_usage(
                         &self.usage,
                     ))),
                     Ok(LanguageModelCompletionEvent::StartMessage {
                         message_id: message.id,
                     }),
-                ]
+                ];
+                if !message.input_transformations.is_empty() {
+                    events.push(Ok(LanguageModelCompletionEvent::InputTransformations(
+                        message.input_transformations,
+                    )));
+                }
+                events
             }
             Event::MessageDelta { delta, usage } => {
                 update_usage(&mut self.usage, &usage);
@@ -1120,6 +1150,9 @@ mod tests {
         // its requests opt into dropping invalidated blocks instead. Models
         // without the prefix-binding check must not receive the beta field.
         for (model, expects_block_binding) in [
+            ("claude-fable-5-2", true),
+            ("claude-mythos-5-2", true),
+            ("claude-opus-5-5", true),
             ("claude-fable-5-1", true),
             ("claude-fable-5", false),
             ("claude-mythos-5-1", false),
@@ -1189,10 +1222,13 @@ mod tests {
         // (model, expects_explicit_opt_out): Claude Opus 5 thinks by default
         // when the `thinking` field is omitted, so suppressing thinking
         // requires sending `{"type": "disabled"}`. Earlier Opus models treat
-        // omission as "off", and Fable rejects `disabled` outright, so both
-        // must keep omitting the field.
+        // omission as "off", while Opus 5.5 and Fable reject `disabled`
+        // outright, so those models must keep omitting the field.
         for (model, expects_explicit_opt_out) in [
             ("claude-opus-5", true),
+            ("claude-fable-5-2", false),
+            ("claude-mythos-5-2", false),
+            ("claude-opus-5-5", false),
             ("claude-opus-4-8", false),
             ("claude-fable-5", false),
         ] {
@@ -1246,7 +1282,69 @@ mod tests {
                     "{model} should omit the thinking field entirely"
                 );
             }
+            if matches!(
+                model,
+                "claude-opus-5-5" | "claude-fable-5-2" | "claude-mythos-5-2"
+            ) {
+                assert!(
+                    anthropic_request.temperature.is_none(),
+                    "{model} must omit temperature because adaptive thinking is always on"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn test_thinking_disallowed_sends_between_tools_for_sonnet_5_5() {
+        // Claude Sonnet 5.5 thinks by default but rejects `disabled`, so
+        // suppressing thinking must send its lowest setting instead.
+        let request = LanguageModelRequest {
+            messages: vec![LanguageModelRequestMessage {
+                role: Role::User,
+                content: vec![MessageContent::Text("Hi".to_string())],
+                cache: false,
+                reasoning_details: None,
+            }],
+            thread_id: None,
+            prompt_cache_key: None,
+            prompt_id: None,
+            intent: None,
+            stop: vec![],
+            temperature: None,
+            tools: vec![],
+            tool_choice: None,
+            thinking_allowed: false,
+            thinking_effort: None,
+            speed: None,
+            compact_at_tokens: None,
+            max_output_tokens: None,
+        };
+
+        let anthropic_request = into_anthropic(
+            request,
+            "claude-sonnet-5-5".to_string(),
+            1.0,
+            128_000,
+            AnthropicModelMode::AdaptiveThinking,
+            AnthropicPromptCacheMode::Automatic,
+            &ANTHROPIC_PROVIDER_ID,
+        )
+        .unwrap();
+
+        let request_json = serde_json::to_value(&anthropic_request).unwrap();
+        assert_eq!(
+            request_json["thinking"],
+            serde_json::json!({ "type": "between_tools" })
+        );
+        assert!(anthropic_request.output_config.is_none());
+        assert!(anthropic_request.temperature.is_none());
+
+        let count_tokens_json =
+            serde_json::to_value(anthropic_request.into_count_tokens_request()).unwrap();
+        assert_eq!(
+            count_tokens_json["thinking"],
+            serde_json::json!({ "type": "between_tools" })
+        );
     }
 
     #[test]
@@ -1758,6 +1856,67 @@ mod tests {
             vec![LanguageModelCompletionEvent::Compaction(
                 CompactionUpdate::Failed
             )]
+        );
+    }
+
+    #[test]
+    fn test_event_mapper_preserves_all_input_transformations() {
+        let mut mapper = AnthropicEventMapper::new(ANTHROPIC_PROVIDER_NAME, ANTHROPIC_PROVIDER_ID);
+        let start_event: Event = serde_json::from_value(serde_json::json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+                "model": "claude-fable-5-1",
+                "usage": { "input_tokens": 10, "output_tokens": 0 },
+                "input_transformations": [
+                    {
+                        "type": "thinking_dropped",
+                        "path": "messages.1.content.0",
+                        "reason": "prefix_binding_mismatch"
+                    },
+                    {
+                        "type": "thinking_mismatch_allowed",
+                        "path": "messages.3.content.0",
+                        "reason": "prefix_binding_mismatch"
+                    },
+                    {
+                        "type": "some_future_transformation",
+                        "path": "messages.5.content.0",
+                        "reason": "some_future_reason"
+                    }
+                ]
+            }
+        }))
+        .unwrap();
+
+        let events = mapper
+            .map_event(start_event)
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(
+            events.last(),
+            Some(&LanguageModelCompletionEvent::InputTransformations(vec![
+                crate::InputTransformation {
+                    kind: "thinking_dropped".into(),
+                    path: "messages.1.content.0".into(),
+                    reason: "prefix_binding_mismatch".into(),
+                },
+                crate::InputTransformation {
+                    kind: "thinking_mismatch_allowed".into(),
+                    path: "messages.3.content.0".into(),
+                    reason: "prefix_binding_mismatch".into(),
+                },
+                crate::InputTransformation {
+                    kind: "some_future_transformation".into(),
+                    path: "messages.5.content.0".into(),
+                    reason: "some_future_reason".into(),
+                },
+            ]))
         );
     }
 
