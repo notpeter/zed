@@ -222,7 +222,7 @@ pub fn guess_compositor() -> &'static str {
 /// While connected, programs the platform launches (for example to open a URL) get these
 /// variables instead of the ones this process started with. Apply
 /// [`App::graphical_environment`] to the programs an app launches, for the same reason.
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "illumos"))]
 #[derive(Clone, Debug, Default)]
 pub struct GraphicalEnvironment {
     /// `WAYLAND_DISPLAY`: a socket name relative to `xdg_runtime_dir`, or an absolute path.
@@ -285,11 +285,21 @@ impl GraphicalEnvironment {
 }
 
 /// The graphical session to connect to. Carries nothing yet on this platform.
-#[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "windows")))]
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "illumos",
+    target_os = "windows"
+)))]
 #[derive(Clone, Debug, Default)]
 pub struct GraphicalEnvironment;
 
-#[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "windows")))]
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "illumos",
+    target_os = "windows"
+)))]
 impl GraphicalEnvironment {
     /// Returns the environment of this process's graphical session.
     pub fn detect() -> Self {
@@ -314,7 +324,7 @@ pub enum WindowingRequest {
     Windowed(GraphicalEnvironment),
 }
 
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "illumos"))]
 impl GraphicalEnvironment {
     /// Reads the display variables from this process's environment.
     ///
@@ -374,7 +384,7 @@ impl GraphicalEnvironment {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "illumos"))]
 bitflags::bitflags! {
     /// The windowing modes a platform may start in or switch to.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
