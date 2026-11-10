@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+freebsd_release=14.3-RELEASE
+freebsd_base_sha256=e38b5cf756d60086a6c2f736eff19cc7685f7e2313e31d14342fc8df57200a92
+
 usage() {
     echo "Usage: $0 [--release]"
 }
@@ -15,7 +18,7 @@ case "${1:-}" in
     "") ;;
     --release)
         profile=release
-        cargo_arguments+=(--release)
+        cargo_arguments+=(--release --config .cargo/bundle-config.toml)
         ;;
     -h|--help)
         usage
@@ -33,9 +36,9 @@ sysroot="${FREEBSD_SYSROOT:-$PWD/target/freebsd-sysroot}"
 if [[ ! -f "$sysroot/usr/include/stdio.h" ]]; then
     download="$PWD/target/freebsd-download"
     mkdir -p "$download" "$sysroot"
-    base_url=https://archive.freebsd.org/old-releases/amd64/14.3-RELEASE
+    base_url="https://archive.freebsd.org/old-releases/amd64/$freebsd_release"
     curl --fail --location --retry 3 "$base_url/base.txz" -o "$download/base.txz"
-    echo "e38b5cf756d60086a6c2f736eff19cc7685f7e2313e31d14342fc8df57200a92  $download/base.txz" | sha256sum --check
+    echo "$freebsd_base_sha256  $download/base.txz" | sha256sum --check
     tar -xJf "$download/base.txz" -C "$sysroot" ./usr/include ./usr/lib ./lib ./libexec
 fi
 sysroot=$(cd "$sysroot" && pwd)
