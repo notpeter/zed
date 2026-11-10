@@ -75,6 +75,11 @@ export PKG_CONFIG_LIBDIR_x86_64_unknown_freebsd="$sysroot/usr/libdata/pkgconfig"
 
 cargo zigbuild --locked "${cargo_arguments[@]}" --package remote_server --bin remote-server --target x86_64-unknown-freebsd
 if [[ "$profile" == release ]]; then
+    target_directory=$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.target_directory')
+    binary="$target_directory/x86_64-unknown-freebsd/release/remote-server"
+    echo "Stripping release artifact..."
+    zig objcopy --strip-all "$binary" "$binary.stripped"
     echo "Compressing release artifact..."
-    gzip -c --best target/x86_64-unknown-freebsd/release/remote-server > target/zed-remote-server-freebsd-x86_64.gz
+    gzip -c --best "$binary.stripped" > "$target_directory/zed-remote-server-freebsd-x86_64.gz"
+    rm "$binary.stripped"
 fi

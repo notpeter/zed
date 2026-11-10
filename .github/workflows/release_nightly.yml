@@ -108,6 +108,11 @@ jobs:
       uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
       with:
         clean: false
+    - name: steps::cache_rust_dependencies_namespace
+      uses: namespacelabs/nscloud-cache-action@a90bb5d4b27522ce881c6e98eebd7d7e6d1653f9
+      with:
+        cache: rust
+        path: ~/.rustup
     - name: run_bundling::setup_freebsd_cross_build
       run: echo "FREEBSD_SYSROOT=$GITHUB_WORKSPACE/target/freebsd-sysroot-$SYSROOT_CACHE_KEY" >> "$GITHUB_ENV"
       env:
@@ -117,7 +122,7 @@ jobs:
       with:
         path: ${{ env.FREEBSD_SYSROOT }}
     - name: run_bundling::setup_freebsd_cross_build
-      run: sudo apt-get update && sudo apt-get install -y cmake ninja-build protobuf-compiler
+      run: sudo apt-get update && sudo apt-get install -y cmake ninja-build protobuf-compiler jq
     - name: run_bundling::setup_freebsd_cross_build
       run: |
         tools_directory="$RUNNER_TEMP/freebsd-build-tools"

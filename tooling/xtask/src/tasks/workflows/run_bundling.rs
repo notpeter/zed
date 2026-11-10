@@ -276,6 +276,8 @@ pub(crate) fn setup_freebsd_cross_build(job: Job) -> Job {
         .timeout_minutes(180u32)
         .add_step(steps::harden_runner())
         .add_step(steps::checkout_repo())
+        .add_step(steps::cache_rust_dependencies_namespace())
+        // TODO: Cache Zig build outputs to avoid rebuilding native dependencies.
         .add_step(
             named::bash(r#"echo "FREEBSD_SYSROOT=$GITHUB_WORKSPACE/target/freebsd-sysroot-$SYSROOT_CACHE_KEY" >> "$GITHUB_ENV""#)
                 // Version the cache path by the pinned archive checksum and extraction recipe.
@@ -290,7 +292,7 @@ pub(crate) fn setup_freebsd_cross_build(job: Job) -> Job {
                 )
                 .add_with(("path", "${{ env.FREEBSD_SYSROOT }}")),
         )
-        .add_step(named::bash("sudo apt-get update && sudo apt-get install -y cmake ninja-build protobuf-compiler"))
+        .add_step(named::bash("sudo apt-get update && sudo apt-get install -y cmake ninja-build protobuf-compiler jq"))
         .add_step(named::bash(indoc! {r#"
             tools_directory="$RUNNER_TEMP/freebsd-build-tools"
             mkdir -p "$tools_directory/cargo-zigbuild" "$tools_directory/zig"

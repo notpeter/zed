@@ -522,7 +522,8 @@ impl FileHandle for std::fs::File {
         anyhow::ensure!(result != -1, "fcntl returned -1");
 
         // SAFETY: `fcntl` will initialize the kif.
-        let c_str = unsafe { CStr::from_ptr(kif.assume_init().kf_path.as_ptr()) };
+        let kif = unsafe { kif.assume_init() };
+        let c_str = unsafe { CStr::from_ptr(kif.kf_path.as_ptr()) };
         anyhow::ensure!(!c_str.is_empty(), "Could find a path for the file handle");
         let path = PathBuf::from(OsStr::from_bytes(c_str.to_bytes()));
         Ok(path)
