@@ -74,9 +74,9 @@ jobs:
                 build --release --locked -p remote_server \
                 --target "x86_64-unknown-${{ matrix.os }}" \
                 --target-dir /var/tmp/zed-target
-            /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote_server version
+            /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote-server version
             mkdir -p artifacts
-            gzip -c /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote_server \
+            gzip -c /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote-server \
                 > artifacts/${{ matrix.artifact }}
 
       - name: Build remote_server on FreeBSD
@@ -106,9 +106,9 @@ jobs:
             cargo build --release --locked -p remote_server \
                 --target "x86_64-unknown-${{ matrix.os }}" \
                 --target-dir /var/tmp/zed-target
-            /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote_server version
+            /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote-server version
             mkdir -p artifacts
-            gzip -c /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote_server \
+            gzip -c /var/tmp/zed-target/x86_64-unknown-${{ matrix.os }}/release/remote-server \
                 > artifacts/${{ matrix.artifact }}
 
       - name: Upload ${{ matrix.os }} remote_server
