@@ -39,6 +39,11 @@ fn parse_platform(output: &str) -> Result<RemotePlatform> {
         ),
     };
 
+    anyhow::ensure!(
+        os != RemoteOs::FreeBsd || matches!(arch, "amd64" | "x86_64"),
+        "FreeBSD remote servers are only supported on x86_64 (amd64); received architecture {arch:?}"
+    );
+
     // exclude armv5,6,7 as they are 32-bit.
     let arch = if arch.starts_with("armv8")
         || arch.starts_with("armv9")
@@ -611,6 +616,28 @@ mod tests {
 
         assert!(parse_platform("Windows x86_64\n").is_err());
         assert!(parse_platform("Linux armv7l\n").is_err());
+    }
+
+    #[test]
+    fn test_freebsd_platform_architectures() -> Result<()> {
+        for architecture in ["amd64", "x86_64"] {
+            let platform = parse_platform(&format!("FreeBSD {architecture}\n"))?;
+            assert_eq!(platform.os, RemoteOs::FreeBsd);
+            assert_eq!(platform.arch, RemoteArch::X86_64);
+        }
+
+        for architecture in ["arm64", "aarch64", "armv8", "i386", "x86"] {
+            let Err(error) = parse_platform(&format!("FreeBSD {architecture}\n")) else {
+                anyhow::bail!("unexpectedly accepted FreeBSD {architecture}");
+            };
+            assert!(
+                error
+                    .to_string()
+                    .contains("only supported on x86_64 (amd64)"),
+                "{error}"
+            );
+        }
+        Ok(())
     }
 
     #[test]

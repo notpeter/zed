@@ -125,6 +125,10 @@ pub fn os_name(cx: &App) -> String {
     {
         format!("FreeBSD {}", cx.compositor_name())
     }
+    #[cfg(target_os = "illumos")]
+    {
+        "illumos".to_string()
+    }
 
     #[cfg(target_os = "windows")]
     {
